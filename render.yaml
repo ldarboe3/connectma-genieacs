@@ -1,0 +1,77 @@
+services:
+  # Public router-facing CWMP endpoint. Render terminates HTTPS at its edge.
+  - type: web
+    name: connectma-genieacs-cwmp
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: genieacs-cwmp
+    envVars:
+      - key: GENIEACS_MONGODB_CONNECTION_URL
+        sync: false
+      - key: GENIEACS_CWMP_INTERFACE
+        value: "0.0.0.0"
+      - key: GENIEACS_CWMP_PORT
+        value: "10000"
+      - key: GENIEACS_CWMP_WORKER_PROCESSES
+        value: "1"
+      - key: GENIEACS_FS_URL_PREFIX
+        value: "https://connectma-genieacs-fs.onrender.com/"
+
+  # Public file-download endpoint used by supported CPE firmware/download tasks.
+  - type: web
+    name: connectma-genieacs-fs
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: genieacs-fs
+    envVars:
+      - key: GENIEACS_MONGODB_CONNECTION_URL
+        sync: false
+      - key: GENIEACS_FS_INTERFACE
+        value: "0.0.0.0"
+      - key: GENIEACS_FS_PORT
+        value: "10000"
+      - key: GENIEACS_FS_WORKER_PROCESSES
+        value: "1"
+
+  # Private NBI. GenieACS NBI has no built-in authentication.
+  # It is reachable only over Render's private network.
+  - type: pserv
+    name: connectma-genieacs-nbi
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: genieacs-nbi
+    envVars:
+      - key: GENIEACS_MONGODB_CONNECTION_URL
+        sync: false
+      - key: GENIEACS_NBI_INTERFACE
+        value: "0.0.0.0"
+      - key: GENIEACS_NBI_PORT
+        value: "7557"
+      - key: GENIEACS_NBI_WORKER_PROCESSES
+        value: "1"
+
+  # Public HTTPS gateway with Basic authentication, forwarding to private NBI.
+  - type: web
+    name: connectma-genieacs-nbi-gateway
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node /app/gateway.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NBI_TARGET
+        fromService:
+          type: pserv
+          name: connectma-genieacs-nbi
+          property: hostport
+      - key: GENIEACS_NBI_USERNAME
+        sync: false
+      - key: GENIEACS_NBI_PASSWORD
+        sync: false
