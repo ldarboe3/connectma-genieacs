@@ -1,81 +1,202 @@
-# ConnectMa GenieACS deployment starter
 
-This repository deploys GenieACS 1.2.16 to Render in the Oregon region.
+# ConnectMa GenieACS Deployment
 
-## Services created
+This repository contains the deployment configuration for running GenieACS 1.2.16 on Render for ConnectMa OS.
 
-- `connectma-genieacs-cwmp`: public HTTPS endpoint for TR-069/CWMP devices.
-- `connectma-genieacs-fs`: public HTTPS endpoint for device file downloads.
-- `connectma-genieacs-nbi`: private GenieACS NBI service.
-- `connectma-genieacs-nbi-gateway`: public HTTPS gateway requiring HTTP Basic authentication before forwarding to private NBI.
+The deployment is designed to support TR-069/CWMP-compatible routers across ConnectMa's multiple POP locations.
 
-The NBI itself is not exposed publicly. GenieACS NBI does not provide built-in authentication; do not create a public NBI service without an authentication layer.
+## 1. Deployment Architecture
 
-## Before deploying
+The deployment consists of four Render services:
 
-1. Create a MongoDB Atlas cluster in an Oregon region if available (AWS us-west-2 is a suitable regional match).
-2. Create a database user dedicated to GenieACS.
-3. Copy the Atlas connection string and append `/genieacs` as the database name, preserving any required query parameters. URL-encode special characters in the username/password.
-4. In Atlas Network Access, allow the outbound IP ranges used by your Render services in Oregon. Find these in each Render service's **Connect > Outbound** panel after creation. Do not use `0.0.0.0/0` for production.
-5. Keep Atlas credentials out of Git and out of Replit source code.
+| Service | Purpose |
+|---|---|
+| `connectma-genieacs-cwmp` | Public HTTPS endpoint for routers using TR-069/CWMP |
+| `connectma-genieacs-fs` | File server for router configuration and firmware downloads |
+| `connectma-genieacs-nbi` | Private GenieACS Northbound Interface |
+| `connectma-genieacs-nbi-gateway` | Authenticated HTTPS gateway for ConnectMa OS to access NBI |
 
-For development, an Atlas free/shared cluster can be used if it meets its limits. Before production with 100–500 devices, review Atlas capacity, backups, storage, and monitoring and upgrade as needed.
+MongoDB Atlas is used as the GenieACS database.
 
-## Deploy with Render Blueprint
+The NBI service must remain private. Never expose an unauthenticated NBI endpoint to the public internet.
 
-1. Push this repository to a new GitHub repository named `connectma-genieacs`.
-2. In Render, choose **New > Blueprint** and connect that repository.
-3. Review the four services. They are all pinned to Oregon.
-4. Select paid, always-on service plans. The Blueprint uses the Starter plan as a low-cost pilot baseline (512 MB RAM per service); monitor memory and CPU and scale up before production if needed.
-5. Render will prompt for `GENIEACS_MONGODB_CONNECTION_URL` for the CWMP, FS, and NBI services. Supply the same Atlas URI each time.
-6. Render will prompt for `GENIEACS_NBI_USERNAME` and `GENIEACS_NBI_PASSWORD` for the gateway. Use a unique long random username/password pair and store them in a password manager.
-7. Deploy the Blueprint.
+## 2. Prerequisites
 
-## After deployment
+Before deployment, prepare:
 
-Copy the actual public URLs from the Render dashboard; Render may alter a service slug if a name is unavailable.
+- A Render account and workspace.
+- A GitHub repository for this project.
+- A MongoDB Atlas account.
+- A MongoDB database user dedicated to GenieACS.
 
-Expected endpoints:
+Recommended database region: AWS Oregon (`us-west-2`), if available.
 
-- CWMP: `https://<actual-cwmp-service-host>/`
-- File Server: `https://<actual-fs-service-host>/`
-- NBI gateway: `https://<actual-nbi-gateway-host>/`
+Create a MongoDB connection string and use `genieacs` as the database name.
 
-The private NBI service should have no public URL. The gateway's `/healthz` endpoint is a health check only; it does not verify database connectivity or NBI functionality.
+Example:
 
-## Configure Replit secrets
+`mongodb+srv://USERNAME:PASSWORD@YOUR-CLUSTER.mongodb.net/genieacs?retryWrites=true&w=majority`
 
-In Replit, add these as Secrets:
+Replace the example credentials and hostname with your actual Atlas details. URL-encode special characters in the username and password.
 
-- `GENIEACS_NBI_URL` = actual HTTPS URL of the NBI gateway
-- `GENIEACS_NBI_USERNAME` = same username entered for the Render gateway
-- `GENIEACS_NBI_PASSWORD` = same password entered for the Render gateway
+In MongoDB Atlas Network Access, allow the outbound IP addresses used by your Render services. Obtain these from the Render service dashboard. Do not use `0.0.0.0/0` for production.
 
-Add non-secret configuration values:
+## 3. Deploying to Render
 
-- `GENIEACS_CWMP_URL` = actual HTTPS CWMP URL
-- `GENIEACS_FS_URL` = actual HTTPS File Server URL
-- `ROUTER_MANAGEMENT_PRIVATE_NETWORK_READY` = `false`
+1. Push this repository to GitHub.
+2. Open the Render dashboard.
+3. Select **New → Blueprint**.
+4. Connect the `connectma-genieacs` GitHub repository.
+5. Review the services and confirm that they are deployed in Oregon.
+6. Configure the environment variables requested by the Blueprint.
+7. Deploy the services.
 
-Do not put these credentials in browser/frontend code. Only the ConnectMa backend should call the NBI gateway.
+The deployment includes:
 
-## Verify before connecting real routers
+- GenieACS CWMP.
+- GenieACS File Server.
+- Private GenieACS NBI.
+- Authenticated NBI gateway.
 
-1. Confirm all four Render services are healthy.
-2. Confirm the gateway `/healthz` returns `{"status":"ok"}`.
-3. Confirm the gateway rejects an unauthenticated request with HTTP 401.
-4. Confirm an authenticated request can reach NBI (for example, a read-only devices query) and returns a valid GenieACS response.
-5. Check Render logs for MongoDB connection errors.
-6. Test one compatible TR-069 device in a controlled pilot before changing any POP-wide configuration.
+The initial service configuration is intended for a controlled pilot. Monitor CPU, memory, database activity and request volume before scaling to 100–500 routers.
 
-Do not set `ROUTER_MANAGEMENT_PRIVATE_NETWORK_READY=true` until the secure path and authenticated API have been verified. This flag should only be changed if the ConnectMa application uses it for a verified network-readiness gate; it does not itself create a VPN or secure network.
+## 4. Required Environment Variables
 
-## Important compatibility and deployment notes
+### GenieACS services
 
-- This deploys the GenieACS services needed for the ConnectMa backend integration. It does not deploy the optional GenieACS web UI.
-- GenieACS manages only devices that support TR-069/CWMP with compatible firmware and configuration.
-- MikroTik, Ubiquiti, Huawei, and TP-Link support is model/firmware-specific. Keep RouterOS API, SNMP, ICMP, and vendor-specific integrations for devices that do not support TR-069.
-- Render terminates TLS for public web services. The GenieACS processes listen on the internal Render service ports.
-- The Starter plan is a pilot baseline, not a capacity guarantee for 100–500 active devices. Monitor actual session volume, MongoDB operations, CPU, memory, and request latency.
-- Render's private network is scoped to services in the same region/workspace. The Replit development app accesses NBI through the authenticated HTTPS gateway, not the private hostname.
-- The gateway is a minimal Basic-auth bridge. For production, add rate limiting, credential rotation, request logging without secrets, and consider a dedicated API-key/JWT or mTLS gateway. Never log Authorization headers.
+Configure the following MongoDB connection variable for the CWMP, File Server and NBI services:
+
+`GENIEACS_MONGODB_CONNECTION_URL`
+
+Use the same Atlas connection string for all three services.
+
+### NBI Gateway
+
+Configure:
+
+`GENIEACS_NBI_USERNAME`
+
+`GENIEACS_NBI_PASSWORD`
+
+Use a unique, strong username and password. Store them securely.
+
+The gateway must authenticate requests before forwarding them to the private NBI service.
+
+## 5. ConnectMa OS Integration
+
+ConnectMa OS will communicate with GenieACS through the authenticated HTTPS gateway.
+
+Add the following secrets to the ConnectMa OS backend environment in Replit:
+
+`GENIEACS_NBI_URL`
+
+`GENIEACS_NBI_USERNAME`
+
+`GENIEACS_NBI_PASSWORD`
+
+Also configure:
+
+`GENIEACS_CWMP_URL`
+
+`GENIEACS_FS_URL`
+
+`ROUTER_MANAGEMENT_PRIVATE_NETWORK_READY=false`
+
+Use the actual public service URLs generated by Render.
+
+Important:
+
+- NBI credentials must remain on the backend.
+- Never expose NBI credentials in frontend or browser code.
+- Do not hardcode credentials in the GitHub repository.
+- Replit connects to the public authenticated gateway, not Render's private NBI hostname.
+
+## 6. Router Management and Compatibility
+
+GenieACS manages routers that support TR-069/CWMP and have compatible firmware and configuration.
+
+Compatibility must be checked for each router model.
+
+ConnectMa OS will support multiple management methods:
+
+- GenieACS/TR-069 for compatible devices.
+- MikroTik RouterOS API for MikroTik routers.
+- SNMP for supported network equipment.
+- ICMP for reachability monitoring.
+- Vendor-specific APIs where available.
+
+Do not assume every MikroTik, TP-Link, Ubiquiti or Huawei router supports TR-069.
+
+GenieACS device provisioning is separate from customer PPPoE authentication, RADIUS accounting and billing. Those functions must continue to use the appropriate ConnectMa OS and network integrations.
+
+## 7. Deployment Verification
+
+Before connecting production routers:
+
+1. Confirm all four Render services are running.
+2. Confirm the CWMP endpoint is accessible over HTTPS.
+3. Confirm the File Server endpoint is accessible over HTTPS.
+4. Confirm the NBI gateway health check works.
+5. Confirm unauthenticated NBI gateway requests return HTTP 401.
+6. Confirm authenticated requests reach GenieACS NBI.
+7. Confirm GenieACS can connect to MongoDB Atlas.
+8. Test one compatible router before expanding to other POP locations.
+
+The `/healthz` endpoint checks gateway health only. It does not prove that NBI or MongoDB is working.
+
+Do not change `ROUTER_MANAGEMENT_PRIVATE_NETWORK_READY` to `true` until the actual secure connectivity and authenticated API integration have been verified.
+
+## 8. Security Requirements
+
+- Keep the NBI service private.
+- Require authentication at the NBI gateway.
+- Use strong, unique credentials.
+- Never expose credentials in frontend code.
+- Never log Authorization headers or passwords.
+- Restrict MongoDB Atlas network access.
+- Use HTTPS for public endpoints.
+- Rotate credentials when necessary.
+- Add rate limiting and stronger access controls before production rollout.
+
+## 9. Production Scaling
+
+The initial configuration is a pilot deployment, not a guarantee of capacity for 100–500 active routers.
+
+Before production rollout, assess:
+
+- GenieACS CPU and memory consumption.
+- MongoDB storage and performance.
+- Number of connected devices.
+- CWMP session frequency.
+- Provisioning workload.
+- File Server traffic.
+- API response times.
+- Backup and recovery requirements.
+
+Scale Render services and MongoDB Atlas according to measured workload.
+
+## 10. ConnectMa OS Deployment Strategy
+
+During development:
+
+- ConnectMa OS remains hosted on Replit.
+- GenieACS runs on Render.
+- MongoDB Atlas stores GenieACS data.
+- ConnectMa OS accesses GenieACS through the authenticated NBI gateway.
+
+After development:
+
+- ConnectMa OS will be deployed to Render.
+- GenieACS services will remain on Render.
+- The integration will be updated to use the appropriate secure service URLs.
+- Production monitoring and access controls will be reviewed before launch.
+
+---
+
+**Project:** ConnectMa GenieACS
+
+**Purpose:** Centralized TR-069 router management and provisioning for ConnectMa OS.
+
+**Repository:** `connectma-genieacs`
+
+**Deployment Region:** Oregon, USA
